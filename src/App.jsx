@@ -51,7 +51,36 @@ const INITIAL_MOVIES = [
 const VideoPlayer = ({ movie, onClose }) => {
   if (!movie) return null;
 
-  const isYouTube = movie.videoUrl.includes('youtube.com') || movie.videoUrl.includes('youtu.be');
+  // Si el video tiene código embed de inserción directa
+  if (movie.isEmbed && movie.embedCode) {
+      // Forzamos que el iframe use 100% de ancho y alto de la pantalla
+      let adjustedEmbed = movie.embedCode;
+      adjustedEmbed = adjustedEmbed.replace(/width="[0-9%px]*"/g, 'width="100%"');
+      adjustedEmbed = adjustedEmbed.replace(/height="[0-9%px]*"/g, 'height="100%"');
+      
+      // Aseguramos que tenga el estilo responsive básico inyectado en la etiqueta iframe
+      if (adjustedEmbed.includes('<iframe')) {
+          adjustedEmbed = adjustedEmbed.replace('<iframe', '<iframe style="width: 100%; height: 100%; border: none;"');
+      }
+
+      return (
+        <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">
+          <button 
+            onClick={onClose}
+            className="absolute top-6 right-6 z-50 text-white hover:text-gray-300 bg-black/50 p-2 rounded-full transition-colors"
+          >
+            <X className="w-8 h-8" />
+          </button>
+          <div 
+            className="w-full h-full flex items-center justify-center"
+            dangerouslySetInnerHTML={{ __html: adjustedEmbed }}
+          />
+        </div>
+      );
+  }
+
+  const isYouTube = movie.videoUrl?.includes('youtube.com') || movie.videoUrl?.includes('youtu.be');
+  const isDrive = movie.videoUrl?.includes('drive.google.com') || movie.videoUrl?.includes('docs.google.com');
   
   // Parche para YouTube: Extraer ID y usar el dominio nocookie
   let embedUrl = movie.videoUrl;
@@ -67,6 +96,21 @@ const VideoPlayer = ({ movie, onClose }) => {
       
       if (videoId) {
            embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0`;
+      }
+  }
+
+  // Parche para Google Drive: Extraer ID y usar la vista de previsualización para saltar límites de descarga
+  let driveEmbedUrl = '';
+  if (isDrive) {
+      let driveId = '';
+      if (movie.videoUrl.includes('/file/d/')) {
+          driveId = movie.videoUrl.split('/file/d/')[1]?.split('/')[0]?.split('?')[0];
+      } else if (movie.videoUrl.includes('id=')) {
+          driveId = movie.videoUrl.split('id=')[1]?.split('&')[0];
+      }
+      
+      if (driveId) {
+          driveEmbedUrl = `https://drive.google.com/file/d/${driveId}/preview`;
       }
   }
 
@@ -86,6 +130,14 @@ const VideoPlayer = ({ movie, onClose }) => {
           title={movie.title}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           referrerPolicy="strict-origin-when-cross-origin"
+          allowFullScreen
+        ></iframe>
+      ) : isDrive && driveEmbedUrl ? (
+        <iframe
+          src={driveEmbedUrl}
+          className="w-full h-full border-none"
+          title={movie.title}
+          allow="autoplay; encrypted-media"
           allowFullScreen
         ></iframe>
       ) : (
@@ -257,7 +309,18 @@ export default function App() {
   const [pin, setPin] = useState('');
   const [movies, setMovies] = useState(INITIAL_MOVIES);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newVideo, setNewVideo] = useState({ title: '', videoUrl: '', thumbnail: '', category: 'Familia', description: '', year: new Date().getFullYear().toString(), duration: '' });
+  
+  const [newVideo, setNewVideo] = useState({ 
+    title: '', 
+    videoUrl: '', 
+    embedCode: '',
+    isEmbed: false,
+    thumbnail: '', 
+    category: 'Familia', 
+    description: '', 
+    year: new Date().getFullYear().toString(), 
+    duration: '' 
+  });
 
   const ADMIN_PIN = '1234';
 
@@ -294,7 +357,17 @@ export default function App() {
     };
     setMovies([video, ...movies]);
     setShowAddModal(false);
-    setNewVideo({ title: '', videoUrl: '', thumbnail: '', category: 'Familia', description: '', year: new Date().getFullYear().toString(), duration: '' });
+    setNewVideo({ 
+      title: '', 
+      videoUrl: '', 
+      embedCode: '',
+      isEmbed: false,
+      thumbnail: '', 
+      category: 'Familia', 
+      description: '', 
+      year: new Date().getFullYear().toString(), 
+      duration: '' 
+    });
   };
 
   const handleDeleteVideo = (id) => {
@@ -363,7 +436,6 @@ export default function App() {
         </div>
       </nav>
 
-      {}
       {/* Admin Login Modal */}
       {showAdminLogin && (
         <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4">
@@ -401,10 +473,40 @@ export default function App() {
                          <label className="block text-sm text-gray-400 mb-1">Título</label>
                          <input required type="text" value={newVideo.title} onChange={e=>setNewVideo({...newVideo, title: e.target.value})} className="w-full bg-zinc-800 border border-zinc-600 rounded p-2 outline-none focus:border-white" />
                      </div>
+                     
+                     {/* Selector de Método */}
                      <div>
-                         <label className="block text-sm text-gray-400 mb-1">URL del Video (YouTube o MP4)</label>
-                         <input required type="text" value={newVideo.videoUrl} onChange={e=>setNewVideo({...newVideo, videoUrl: e.target.value})} className="w-full bg-zinc-800 border border-zinc-600 rounded p-2 outline-none focus:border-white" placeholder="Ej: https://youtu.be/..." />
+                         <label className="block text-sm text-gray-400 mb-2">Método de origen del video</label>
+                         <div className="flex gap-4">
+                             <button 
+                                 type="button" 
+                                 onClick={() => setNewVideo({...newVideo, isEmbed: false})}
+                                 className={`flex-1 py-2 px-3 rounded font-semibold text-sm border transition ${!newVideo.isEmbed ? 'bg-white text-black border-white' : 'bg-zinc-800 text-gray-300 border-zinc-600 hover:border-white'}`}
+                             >
+                                 Enlace normal (YouTube, Drive, MP4)
+                             </button>
+                             <button 
+                                 type="button" 
+                                 onClick={() => setNewVideo({...newVideo, isEmbed: true})}
+                                 className={`flex-1 py-2 px-3 rounded font-semibold text-sm border transition ${newVideo.isEmbed ? 'bg-white text-black border-white' : 'bg-zinc-800 text-gray-300 border-zinc-600 hover:border-white'}`}
+                             >
+                                 Código Embed (Iframe HTML)
+                             </button>
+                         </div>
                      </div>
+
+                     {!newVideo.isEmbed ? (
+                         <div>
+                             <label className="block text-sm text-gray-400 mb-1">URL del Video (YouTube, Google Drive o MP4)</label>
+                             <input required={!newVideo.isEmbed} type="text" value={newVideo.videoUrl} onChange={e=>setNewVideo({...newVideo, videoUrl: e.target.value})} className="w-full bg-zinc-800 border border-zinc-600 rounded p-2 outline-none focus:border-white" placeholder="Ej: https://drive.google.com/file/d/... o https://youtu.be/..." />
+                         </div>
+                     ) : (
+                         <div>
+                             <label className="block text-sm text-gray-400 mb-1">Código de inserción completo (&lt;iframe&gt;...&lt;/iframe&gt;)</label>
+                             <textarea required={newVideo.isEmbed} value={newVideo.embedCode} onChange={e=>setNewVideo({...newVideo, embedCode: e.target.value})} className="w-full bg-zinc-800 border border-zinc-600 rounded p-2 outline-none focus:border-white h-24 font-mono text-xs" placeholder='Ej: <iframe src="..." width="560" height="315" ...></iframe>'></textarea>
+                         </div>
+                     )}
+
                      <div>
                          <label className="block text-sm text-gray-400 mb-1">URL de la Imagen de Portada</label>
                          <input required type="text" value={newVideo.thumbnail} onChange={e=>setNewVideo({...newVideo, thumbnail: e.target.value})} className="w-full bg-zinc-800 border border-zinc-600 rounded p-2 outline-none focus:border-white" placeholder="https://..." />
@@ -429,7 +531,6 @@ export default function App() {
           </div>
       )}
 
-      {}
       {/* Modo Búsqueda Activo */}
       {searchQuery ? (
           <div className="pt-32 px-4 md:px-12 min-h-screen">
@@ -532,7 +633,7 @@ export default function App() {
           </>
       )}
 
-      {}
+      {/* Modals */}
       {playingMovie && (
         <VideoPlayer 
           movie={playingMovie} 
